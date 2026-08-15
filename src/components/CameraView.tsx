@@ -50,7 +50,7 @@ function getCameraErrorMessage(error: unknown): string {
   switch (error.name) {
     case "NotAllowedError":
     case "SecurityError":
-      return "Camera permission is required for SignSync. Please allow access and try again.";
+      return "Camera permission is required for SIGNEXA. Please allow access and try again.";
     case "NotFoundError":
       return "No camera was found on this device.";
     case "NotReadableError":

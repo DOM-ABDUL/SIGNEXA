@@ -1,10 +1,10 @@
 /** All the words shown on screen live here, so text is easy to change later. */
 export const appContent = {
-  brand: "SignSync",
-  tagline: "Offline, Bidirectional ISL Communication",
+  brand: "SIGNEXA",
+  tagline: "Adaptive, Multilingual, Offline-First ISL Communication",
   description:
-    "SignSync will help people communicate in Indian Sign Language — sign to text, and text back to sign — right on your device.",
+    "SIGNEXA helps prepare accessible Indian Sign Language communication tools that can work on-device and adapt across languages.",
   primaryActionLabel: "Start Camera",
   helperText: "Open the camera to begin testing the live video pipeline.",
-  statusBadge: "Milestone 3",
+  statusBadge: "Dataset Pipeline",
 } as const;
