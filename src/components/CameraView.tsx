@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { HandLandmarker } from "@mediapipe/tasks-vision";
-import { detectHandsForVideo, getHandLandmarker, closeHandLandmarker } from "../ml/mediapipe/detector";
+import { FEATURE_VECTOR_LENGTH, HAND_LANDMARK_COUNT, normalizeFrameHands } from "../ml/landmarks/normalize";
+import type { NormalizedFrameResult } from "../ml/landmarks/types";
+import { closeHandLandmarker, detectHandsForVideo, getHandLandmarker } from "../ml/mediapipe/detector";
 import type { HandLandmarks, MediaPipeStatus } from "../ml/mediapipe/types";
 import { PrimaryButton } from "./PrimaryButton";
 
@@ -10,14 +12,34 @@ type CameraViewProps = {
   autoStart?: boolean;
 };
 
-type HandDebugInfo = {
-  handsDetected: number;
-  landmarkCounts: number[];
+type InspectorHand = {
+  handIndex: number;
+  rawLandmarkCount: number;
+  normalizedLandmarkCount: number;
+  featureCount: number;
+  featurePreview: number[];
+  scale: number | null;
+  errorMessage: string | null;
 };
 
-const EMPTY_DEBUG_INFO: HandDebugInfo = {
+type InspectorState = {
+  handsDetected: number;
+  rawLandmarkCounts: number[];
+  hands: InspectorHand[];
+};
+
+const INSPECTOR_REFRESH_MS = 250;
+const FEATURE_PREVIEW_COUNT = 12;
+
+const EMPTY_NORMALIZED_FRAME: NormalizedFrameResult = {
+  rawHands: [],
+  hands: [],
+};
+
+const EMPTY_INSPECTOR_STATE: InspectorState = {
   handsDetected: 0,
-  landmarkCounts: [],
+  rawLandmarkCounts: [],
+  hands: [],
 };
 
 function getCameraErrorMessage(error: unknown): string {
@@ -42,12 +64,12 @@ function getCameraErrorMessage(error: unknown): string {
   }
 }
 
-function getMediaPipeErrorMessage(error: unknown): string {
-  if (error instanceof DOMException) {
-    return "MediaPipe could not be initialized.";
-  }
-
+function getMediaPipeErrorMessage(): string {
   return "MediaPipe could not be initialized.";
+}
+
+function formatValue(value: number): string {
+  return value.toFixed(4);
 }
 
 function drawLandmarksOnCanvas(canvas: HTMLCanvasElement, hands: HandLandmarks[]) {
@@ -58,7 +80,6 @@ function drawLandmarksOnCanvas(canvas: HTMLCanvasElement, hands: HandLandmarks[]
   }
 
   context.clearRect(0, 0, canvas.width, canvas.height);
-
   context.fillStyle = "#38bdf8";
 
   for (const hand of hands) {
@@ -73,18 +94,75 @@ function drawLandmarksOnCanvas(canvas: HTMLCanvasElement, hands: HandLandmarks[]
   }
 }
 
-function areDebugInfoEqual(a: HandDebugInfo, b: HandDebugInfo): boolean {
+function buildInspectorState(frame: NormalizedFrameResult): InspectorState {
+  return {
+    handsDetected: frame.rawHands.length,
+    rawLandmarkCounts: frame.rawHands.map((hand) => hand.length),
+    hands: frame.hands.map((handResult, index) => {
+      const rawLandmarkCount = frame.rawHands[index]?.length ?? 0;
+
+      if (!handResult.ok) {
+        return {
+          handIndex: index + 1,
+          rawLandmarkCount,
+          normalizedLandmarkCount: 0,
+          featureCount: 0,
+          featurePreview: [],
+          scale: null,
+          errorMessage: handResult.error.message,
+        };
+      }
+
+      return {
+        handIndex: index + 1,
+        rawLandmarkCount,
+        normalizedLandmarkCount: handResult.data.normalizedLandmarks.length,
+        featureCount: handResult.data.featureVector.length,
+        featurePreview: handResult.data.featureVector.slice(0, FEATURE_PREVIEW_COUNT),
+        scale: handResult.data.scale,
+        errorMessage: null,
+      };
+    }),
+  };
+}
+
+function areInspectorStatesEqual(a: InspectorState, b: InspectorState): boolean {
   if (a.handsDetected !== b.handsDetected) {
     return false;
   }
 
-  if (a.landmarkCounts.length !== b.landmarkCounts.length) {
+  if (a.rawLandmarkCounts.length !== b.rawLandmarkCounts.length || a.hands.length !== b.hands.length) {
     return false;
   }
 
-  for (let i = 0; i < a.landmarkCounts.length; i += 1) {
-    if (a.landmarkCounts[i] !== b.landmarkCounts[i]) {
+  for (let i = 0; i < a.rawLandmarkCounts.length; i += 1) {
+    if (a.rawLandmarkCounts[i] !== b.rawLandmarkCounts[i]) {
       return false;
+    }
+  }
+
+  for (let i = 0; i < a.hands.length; i += 1) {
+    const first = a.hands[i];
+    const second = b.hands[i];
+
+    if (
+      first.rawLandmarkCount !== second.rawLandmarkCount ||
+      first.normalizedLandmarkCount !== second.normalizedLandmarkCount ||
+      first.featureCount !== second.featureCount ||
+      first.scale !== second.scale ||
+      first.errorMessage !== second.errorMessage
+    ) {
+      return false;
+    }
+
+    if (first.featurePreview.length !== second.featurePreview.length) {
+      return false;
+    }
+
+    for (let j = 0; j < first.featurePreview.length; j += 1) {
+      if (first.featurePreview[j] !== second.featurePreview[j]) {
+        return false;
+      }
     }
   }
 
@@ -100,13 +178,15 @@ export function CameraView({ autoStart = false }: CameraViewProps) {
   const isMountedRef = useRef(true);
   const requestIdRef = useRef(0);
   const lastVideoTimeRef = useRef(-1);
-  const latestDebugInfoRef = useRef<HandDebugInfo>(EMPTY_DEBUG_INFO);
+  const lastInspectorRefreshRef = useRef(0);
+  const latestNormalizedFrameRef = useRef<NormalizedFrameResult>(EMPTY_NORMALIZED_FRAME);
+  const latestInspectorStateRef = useRef<InspectorState>(EMPTY_INSPECTOR_STATE);
 
   const [status, setStatus] = useState<CameraStatus>("idle");
-  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [mediaPipeStatus, setMediaPipeStatus] = useState<MediaPipeStatus>("idle");
-  const [mediaPipeErrorMessage, setMediaPipeErrorMessage] = useState<string>("");
-  const [debugInfo, setDebugInfo] = useState<HandDebugInfo>(EMPTY_DEBUG_INFO);
+  const [mediaPipeErrorMessage, setMediaPipeErrorMessage] = useState("");
+  const [inspectorState, setInspectorState] = useState<InspectorState>(EMPTY_INSPECTOR_STATE);
 
   const releaseStream = () => {
     const stream = streamRef.current;
@@ -138,8 +218,9 @@ export function CameraView({ autoStart = false }: CameraViewProps) {
   };
 
   const resetDetectionState = () => {
-    latestDebugInfoRef.current = EMPTY_DEBUG_INFO;
-    setDebugInfo(EMPTY_DEBUG_INFO);
+    latestNormalizedFrameRef.current = EMPTY_NORMALIZED_FRAME;
+    latestInspectorStateRef.current = EMPTY_INSPECTOR_STATE;
+    setInspectorState(EMPTY_INSPECTOR_STATE);
   };
 
   const stopCamera = () => {
@@ -174,10 +255,20 @@ export function CameraView({ autoStart = false }: CameraViewProps) {
       lastVideoTimeRef.current = video.currentTime;
 
       const frame = detectHandsForVideo(detectorRef.current, video, performance.now());
-      const nextDebugInfo: HandDebugInfo = {
-        handsDetected: frame.hands.length,
-        landmarkCounts: frame.hands.map((hand) => hand.length),
-      };
+      const normalizedFrame = normalizeFrameHands(frame.hands);
+      latestNormalizedFrameRef.current = normalizedFrame;
+
+      const nextInspectorState = buildInspectorState(normalizedFrame);
+      const inspectorChanged = !areInspectorStatesEqual(latestInspectorStateRef.current, nextInspectorState);
+      const handsCountChanged = latestInspectorStateRef.current.handsDetected !== nextInspectorState.handsDetected;
+      const refreshIntervalReached = performance.now() - lastInspectorRefreshRef.current >= INSPECTOR_REFRESH_MS;
+      const shouldUpdateInspector = inspectorChanged && (handsCountChanged || refreshIntervalReached);
+
+      if (shouldUpdateInspector) {
+        lastInspectorRefreshRef.current = performance.now();
+        latestInspectorStateRef.current = nextInspectorState;
+        setInspectorState(nextInspectorState);
+      }
 
       const canvas = canvasRef.current;
       if (canvas) {
@@ -187,11 +278,6 @@ export function CameraView({ autoStart = false }: CameraViewProps) {
         }
 
         drawLandmarksOnCanvas(canvas, frame.hands);
-      }
-
-      if (!areDebugInfoEqual(latestDebugInfoRef.current, nextDebugInfo)) {
-        latestDebugInfoRef.current = nextDebugInfo;
-        setDebugInfo(nextDebugInfo);
       }
 
       rafIdRef.current = window.requestAnimationFrame(step);
@@ -220,13 +306,13 @@ export function CameraView({ autoStart = false }: CameraViewProps) {
 
       setMediaPipeStatus("ready");
       return true;
-    } catch (error) {
+    } catch {
       if (!isMountedRef.current) {
         return false;
       }
 
       setMediaPipeStatus("error");
-      setMediaPipeErrorMessage(getMediaPipeErrorMessage(error));
+      setMediaPipeErrorMessage(getMediaPipeErrorMessage());
       return false;
     }
   };
@@ -395,11 +481,42 @@ export function CameraView({ autoStart = false }: CameraViewProps) {
 
       <div className="mt-4 rounded-xl border border-white/10 bg-slate-900/70 p-4 text-sm text-slate-200">
         <p className="font-medium">MediaPipe Status: {mediaPipeStatusMessageByState[mediaPipeStatus]}</p>
-        <p className="mt-2">Hands detected: {debugInfo.handsDetected}</p>
-        {debugInfo.handsDetected > 0 && (
-          <p className="mt-1">Landmarks detected: {debugInfo.landmarkCounts.join(" + ")}</p>
-        )}
+        <p className="mt-2">Hands detected: {inspectorState.handsDetected}</p>
+        {inspectorState.handsDetected > 0 && <p className="mt-1">Raw landmarks: {inspectorState.rawLandmarkCounts.join(" + ")}</p>}
       </div>
+
+      <details className="mt-4 rounded-xl border border-white/10 bg-slate-900/70 p-4 text-sm text-slate-200">
+        <summary className="cursor-pointer font-medium">Landmark Data Inspector</summary>
+
+        <div className="mt-3 space-y-3">
+          <p>
+            Expected shape per hand: {HAND_LANDMARK_COUNT} landmarks, {FEATURE_VECTOR_LENGTH} feature values.
+          </p>
+          <p>Raw hand buffers in memory: {latestNormalizedFrameRef.current.rawHands.length}</p>
+
+          {inspectorState.hands.length === 0 && <p>No normalized feature vector is available.</p>}
+
+          {inspectorState.hands.map((hand) => (
+            <div key={hand.handIndex} className="rounded-lg border border-white/10 bg-slate-950/60 p-3">
+              <p className="font-medium">Hand {hand.handIndex}</p>
+              <p className="mt-1">Raw landmarks: {hand.rawLandmarkCount}</p>
+
+              {hand.errorMessage ? (
+                <p className="mt-1 text-red-300">Normalization error: {hand.errorMessage}</p>
+              ) : (
+                <>
+                  <p className="mt-1">Normalized landmarks: {hand.normalizedLandmarkCount}</p>
+                  <p className="mt-1">Feature vector: {hand.featureCount} values</p>
+                  {hand.scale !== null && <p className="mt-1">Scale reference (wrist to middle MCP): {formatValue(hand.scale)}</p>}
+                  <p className="mt-1 break-words text-slate-300">
+                    First {FEATURE_PREVIEW_COUNT} values: [{hand.featurePreview.map((value) => formatValue(value)).join(", ")}]
+                  </p>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      </details>
 
       <div className="mt-5 flex flex-col gap-3 sm:flex-row">
         {status !== "active" ? (
