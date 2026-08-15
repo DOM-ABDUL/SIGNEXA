@@ -1,0 +1,60 @@
+{
+  "project": "SIGNEXA",
+  "statusMessage": "Final dataset stack locked. No dataset has been downloaded yet.",
+  "datasets": [
+    {
+      "id": "include",
+      "name": "INCLUDE",
+      "role": "PRIMARY_STATIC_TRAINING_DATASET",
+      "source": "To be added by SIGNEXA team after access confirmation",
+      "description": "First real dataset for isolated ISL word recognition and initial static model baselines.",
+      "status": "NOT_DOWNLOADED",
+      "taskType": "STATIC_SIGNS",
+      "mediaType": "UNKNOWN",
+      "labelType": "UNKNOWN",
+      "hasSignerIds": false,
+      "hasLandmarks": false,
+      "hasVideos": false,
+      "hasImages": false,
+      "license": "NOT_VERIFIED",
+      "localPath": "",
+      "notes": "Not downloaded. Not processed. Use for first real static training pipeline once acquired and inspected."
+    },
+    {
+      "id": "sign_dictionary_dataset",
+      "name": "SIGN DICTIONARY DATASET",
+      "role": "VOCABULARY_EXPANSION_DATASET",
+      "source": "To be added by SIGNEXA team after source verification",
+      "description": "Used later to expand vocabulary coverage beyond INCLUDE.",
+      "status": "NOT_DOWNLOADED",
+      "taskType": "STATIC_SIGNS",
+      "mediaType": "UNKNOWN",
+      "labelType": "UNKNOWN",
+      "hasSignerIds": false,
+      "hasLandmarks": false,
+      "hasVideos": false,
+      "hasImages": false,
+      "license": "NOT_VERIFIED",
+      "localPath": "",
+      "notes": "Not downloaded. Do not merge with INCLUDE yet. Expansion phase only."
+    },
+    {
+      "id": "isl_csltr",
+      "name": "ISL-CSLTR",
+      "role": "FUTURE_DYNAMIC_CONTINUOUS_DATASET",
+      "source": "To be added by SIGNEXA team after source verification",
+      "description": "Reserved for future continuous signing and temporal sequence experiments.",
+      "status": "NOT_DOWNLOADED",
+      "taskType": "CONTINUOUS_SIGNING",
+      "mediaType": "UNKNOWN",
+      "labelType": "UNKNOWN",
+      "hasSignerIds": false,
+      "hasLandmarks": false,
+      "hasVideos": false,
+      "hasImages": false,
+      "license": "NOT_VERIFIED",
+      "localPath": "",
+      "notes": "Not downloaded. Future Holistic and GRU pipeline stage only."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "datasetId": "include",
+  "role": "PRIMARY_STATIC_TRAINING_DATASET",
+  "taskType": "STATIC_SIGNS",
+  "mediaType": "UNKNOWN",
+  "labelSource": "TO_BE_INSPECTED_AFTER_DOWNLOAD",
+  "expectedLabelType": "UNKNOWN",
+  "signerAwareEvaluation": "PENDING_DATASET_METADATA",
+  "landmarkExtractionRequired": true,
+  "normalizationRequired": true,
+  "featureDimensions": 63,
+  "processingStatus": "NOT_DOWNLOADED_NOT_PROCESSED"
+}
