@@ -95,20 +95,18 @@ def _find_column(df: pd.DataFrame, candidates: Sequence[str], purpose: str) -> s
 
 
 def detect_columns(df: pd.DataFrame) -> DatasetColumns:
-    video_col = _find_column(
-        df,
-        [
-            "video_id",
-            "video",
-            "video_name",
-            "video_filename",
-            "video_file",
-            "filename",
-            "file_name",
-            "video_path",
-        ],
-        "video id",
-    )
+    lower_map = {c.lower(): c for c in df.columns}
+
+    # SIGNEXA holistic dataset requirement:
+    # video_path is the globally unique video identity.
+    if "video_path" not in lower_map:
+        raise ValueError(
+            "Missing required video identity column: 'video_path'. "
+            "For this dataset, filename-style columns are not globally unique and must not be used. "
+            f"Available columns: {list(df.columns)}"
+        )
+    video_col = lower_map["video_path"]
+
     split_col = _find_column(df, ["split", "dataset_split", "subset"], "split")
     label_col = _find_column(
         df,
@@ -204,10 +202,11 @@ def validate_integrity(df: pd.DataFrame, cols: DatasetColumns) -> None:
         if len(unique_sorted) != EXPECTED_FRAMES_PER_VIDEO:
             raise ValueError(f"Duplicate/non-unique frame indexes for video: {vid}")
 
-        diffs = np.diff(np.sort(unique_sorted))
-        if not np.all(diffs == 1):
+        sorted_vals = np.sort(unique_sorted)
+        diffs = np.diff(sorted_vals)
+        if not np.all(diffs > 0):
             raise ValueError(
-                f"Frame order for video {vid} is not contiguous with step=1. Values={unique_sorted.tolist()}"
+                f"Frame order for video {vid} is not strictly increasing. Values={sorted_vals.tolist()}"
             )
 
 
@@ -423,10 +422,20 @@ def main() -> None:
 
     validate_feature_schema(df)
     cols = detect_columns(df)
+    print(f"[INFO] video identity column: {cols.video_col}")
+
     validate_integrity(df, cols)
+    print("[OK] split integrity check passed")
 
     datasets, class_names = build_video_sequences(df, cols)
     num_classes = len(class_names)
+
+    print(
+        "[INFO] split video counts: "
+        f"train={len(datasets['train'].video_ids)} "
+        f"val={len(datasets['val'].video_ids)} "
+        f"test={len(datasets['test'].video_ids)}"
+    )
 
     x_train, y_train = datasets["train"].x, datasets["train"].y_idx
     x_val, y_val = datasets["val"].x, datasets["val"].y_idx
