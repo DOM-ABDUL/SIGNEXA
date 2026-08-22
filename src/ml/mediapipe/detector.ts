@@ -1,5 +1,12 @@
-import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
-import type { HandDetectionFrame } from "./types";
+import {
+  FilesetResolver,
+  HandLandmarker,
+} from "@mediapipe/tasks-vision";
+
+import type {
+  HandDetectionFrame,
+  HandednessInfo,
+} from "./types";
 
 const WASM_BASE_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm";
@@ -12,13 +19,18 @@ let detectorInstance: HandLandmarker | null = null;
 let detectorGeneration = 0;
 
 async function createHandLandmarker(): Promise<HandLandmarker> {
-  const vision = await FilesetResolver.forVisionTasks(WASM_BASE_URL);
+  const vision =
+    await FilesetResolver.forVisionTasks(WASM_BASE_URL);
 
   return HandLandmarker.createFromOptions(vision, {
     baseOptions: {
       modelAssetPath: HAND_MODEL_ASSET_URL,
     },
     runningMode: "VIDEO",
+
+    // INCLUDE-10 uses a two-hand feature representation:
+    // left hand = 63 values
+    // right hand = 63 values
     numHands: 2,
   });
 }
@@ -35,7 +47,9 @@ export async function getHandLandmarker(): Promise<HandLandmarker> {
       .then((detector) => {
         if (currentGeneration !== detectorGeneration) {
           detector.close();
-          throw new Error("HandLandmarker initialization cancelled.");
+          throw new Error(
+            "HandLandmarker initialization cancelled.",
+          );
         }
 
         detectorInstance = detector;
@@ -43,7 +57,10 @@ export async function getHandLandmarker(): Promise<HandLandmarker> {
       })
       .catch((error) => {
         detectorPromise = null;
-        console.error("HandLandmarker initialization failed:", error);
+        console.error(
+          "HandLandmarker initialization failed:",
+          error,
+        );
         throw error;
       });
   }
@@ -56,16 +73,51 @@ export function detectHandsForVideo(
   video: HTMLVideoElement,
   timestampMs: number,
 ): HandDetectionFrame {
-  const result = detector.detectForVideo(video, timestampMs);
+  const result = detector.detectForVideo(
+    video,
+    timestampMs,
+  );
+
+  const handedness: HandednessInfo[] =
+    result.handedness.map((candidates) => {
+      const primary = candidates?.[0];
+
+      const rawLabel = String(
+        primary?.categoryName ??
+          primary?.displayName ??
+          "",
+      ).toLowerCase();
+
+      let label: HandednessInfo["label"] = "Unknown";
+
+      if (rawLabel === "left") {
+        label = "Left";
+      } else if (rawLabel === "right") {
+        label = "Right";
+      }
+
+      const score = Number(primary?.score ?? 0);
+
+      return {
+        label,
+        score: Number.isFinite(score)
+          ? score
+          : 0,
+      };
+    });
+
+  const hands = result.landmarks.map(
+    (landmarks) =>
+      landmarks.map((landmark) => ({
+        x: landmark.x,
+        y: landmark.y,
+        z: landmark.z,
+      })),
+  );
 
   return {
-    hands: result.landmarks.map((handLandmarks) =>
-      handLandmarks.map((point) => ({
-        x: point.x,
-        y: point.y,
-        z: point.z,
-      })),
-    ),
+    hands,
+    handedness,
     timestampMs,
   };
 }
